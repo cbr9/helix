@@ -1,6 +1,7 @@
 use std::fmt::Write;
 use std::io::BufReader;
 use std::ops::{self, Deref};
+use std::str::FromStr;
 
 use crate::job::Job;
 
@@ -130,6 +131,40 @@ fn open(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow:
             align_view(doc, view, Align::Center);
         }
     }
+    Ok(())
+}
+
+fn open_lines(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let files = args
+        .first()
+        .map(PathBuf::from)
+        .filter(|p| p.canonicalize().is_ok())
+        .map(|p| std::fs::read_to_string(p).ok())
+        .flatten()
+        .map(|text| text.lines().map(String::from).collect::<Vec<_>>());
+
+    if let Some(files) = files {
+        let doc = doc!(cx.editor);
+        let mut action = if doc.path().is_none() {
+            Action::Replace
+        } else {
+            Action::Load
+        };
+
+        for path in files {
+            if let Ok(true) = std::fs::canonicalize(&path).map(|p| p.is_file()) {
+                let (path, _) = crate::args::parse_file(&path);
+                let path = helix_stdx::path::expand_tilde(path);
+                cx.editor.open(&path, action)?;
+                action = Action::Load;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -2612,6 +2647,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::all(completers::filename),
         signature: Signature {
             positionals: (1, None),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "open-lines",
+        aliases: &[],
+        doc: "Read a file containing one filepath per line and open those files.",
+        fun: open_lines,
+        completer: CommandCompleter::all(completers::filename),
+        signature: Signature {
+            positionals: (1, Some(1)),
             ..Signature::DEFAULT
         },
     },
